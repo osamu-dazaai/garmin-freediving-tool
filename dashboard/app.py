@@ -639,8 +639,9 @@ def screen_protocol():
             'sess_set': 1, 'sess_phase': 'HOLD',
             'sess_start': time_module.time()
         })
-        st.session_state.page = "active"
-        st.query_params.clear()
+        st.query_params["page"] = "active"
+        if "proto" in st.query_params:
+            del st.query_params["proto"]
         st.rerun()
 
 
@@ -797,7 +798,8 @@ def take_screenshot(url="http://localhost:8503", path="/home/clawd/apnea_debug.p
 # ── Sync action ───────────────────────────────────────────────────────────────
 
 if st.query_params.get("action") == "sync":
-    st.query_params.clear()
+    if "action" in st.query_params:
+        del st.query_params["action"]
     with st.spinner("Syncing Garmin data..."):
         venv_py = str(Path(__file__).parent.parent / 'venv' / 'bin' / 'python')
         script  = str(Path(__file__).parent.parent / 'src' / 'sync' / 'garmin_sync.py')
