@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import sqlite3
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -33,22 +34,32 @@ class GarminSync:
         # Initialize database
         self.init_database()
         
+        # Token cache — avoids re-hitting Garmin SSO on every sync run
+        self.tokenstore = str(Path(self.db_path).parent / ".garth")
+
         # Garmin client (will login on first use)
         self.client = None
-    
+
     def login(self):
-        """Login to Garmin Connect"""
+        """Login to Garmin Connect using cached OAuth tokens.
+
+        Garmin SSO is currently rate-limiting all automated logins (429).
+        Token-only auth is the only working path — do not fall back to SSO.
+        """
         if self.client is not None:
             return
-        
-        print("🔐 Logging in to Garmin Connect...")
-        try:
-            self.client = Garmin(self.email, self.password)
-            self.client.login()
-            print(f"✅ Logged in as: {self.client.get_full_name()}")
-        except Exception as e:
-            print(f"❌ Login failed: {e}")
-            raise
+
+        if not Path(self.tokenstore).exists():
+            raise RuntimeError(
+                f"No token cache found at {self.tokenstore}. "
+                "Garmin SSO is currently blocked (429). "
+                "Tokens must be obtained manually."
+            )
+
+        print("🔐 Loading Garmin tokens from cache...")
+        self.client = Garmin(self.email, self.password)
+        self.client.login(tokenstore=self.tokenstore)
+        print(f"✅ Logged in from token cache ({self.tokenstore})")
     
     def init_database(self):
         """Initialize SQLite database with schema"""
@@ -238,14 +249,16 @@ class GarminSync:
         except Exception as e:
             print(f"  ⚠️  Activities failed: {e}")
     
-    def sync_days(self, days=7):
+    def sync_days(self, days=7, delay=0):
         """Sync last N days of data"""
         print(f"\n🔄 Syncing last {days} days...")
-        
+
         for i in range(days):
             target_date = date.today() - timedelta(days=i)
             self.sync_date(target_date)
-        
+            if delay > 0 and i < days - 1:
+                time.sleep(delay)
+
         print(f"\n✅ Sync complete! {days} days synced.")
         self.print_summary()
     
@@ -297,6 +310,7 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='Sync Garmin data')
     parser.add_argument('--days', type=int, default=7, help='Number of days to sync (default: 7)')
+    parser.add_argument('--delay', type=float, default=0, help='Seconds to sleep between days (default: 0)')
     parser.add_argument('--today', action='store_true', help='Sync only today')
     parser.add_argument('--summary', action='store_true', help='Show database summary')
     
@@ -310,4 +324,4 @@ if __name__ == '__main__':
         syncer.sync_date(date.today())
         syncer.print_summary()
     else:
-        syncer.sync_days(args.days)
+        syncer.sync_days(args.days, delay=args.delay)
